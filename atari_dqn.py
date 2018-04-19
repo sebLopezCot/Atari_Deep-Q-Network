@@ -28,6 +28,10 @@ class CircularQueue(object):
     def clear(self):
         self.data = deque()
 
+    def __iter__(self):
+        for item in self.data:
+            yield item
+
     def __getitem__(self, index):
         return self.data[index]
 
@@ -51,7 +55,7 @@ class DQN(object):
     def create_model(self, hyperparams):
         print "CREATING MODEL...\n"
         
-        input_layer = Input(shape = (84,84,4))
+        input_layer = Input(shape = (84,84,self.hyperparams['last_k_frames']))
         conv1 = Conv2D(16, (8, 8), strides=(4, 4), activation='relu', padding='same')(input_layer)
         conv2 = Conv2D(32, (4, 4), strides=(2, 2), activation='relu', padding='same')(conv1)
         fc = Dense(256, activation='relu')(conv2)
@@ -118,10 +122,18 @@ class DQNTrainer(object):
                 # With probability epsilon, select a random action, otherwise choose
                 # action which maximizes the optimal value function
                 chosen_action = None
-                if np.random.random() < self.calc_epsilon(episode, t_step):
-                    chosen_action = np.random.randint(self.hyperparams['num_actions'])
-                else:
-                    chosen_action = ... # TODO
+                if t_step % (self.hyperparams['frame_skip_amount']+1) != 0:
+                    # Just perform the last action every few timesteps for efficiency
+                    if len(self.action_seq) > 0:
+                        chosen_action = self.action_seq[-1]
+                    else:
+                        chosen_action = self.env.action_space.sample()
+                elif np.random.random() < self.calc_epsilon(episode, t_step):
+                    chosen_action = self.env.action_space.sample() 
+                elif len(self.obs_seq) >= self.hyperparams['last_k_frames']:
+                    obs_stack = np.dstack(list(self.obs_seq))
+                    q_vals = self.dqn.predict(obs_stack, batch_size=self.hyperparams['batch_size'])
+                    chosen_action = np.argmax(q_vals) # returns the action index
 
                 # Execute action and observe reward and image
                 obs, reward, done, info = self.env.step(chosen_action)
@@ -134,18 +146,16 @@ class DQNTrainer(object):
                 # Store the transition in the replay memory
                 self.replay_memory((self.obs_seq[-2], chosen_action, reward, self.obs_seq[-1]))
 
-                # Sample random minibatch of transitions from replay memory
-                minibatch = [self.replay_memory.sample() for j in range(self.hyperparams['batch_size'])]
+                if t_step % (self.hyperparams['frame_skip_amount']+1) == 0:
+                    # Sample random minibatch of transitions from replay memory
+                    minibatch = [self.replay_memory.sample() for j in range(self.hyperparams['batch_size'])]
 
-                # Calculate target values for loss
-                y_js = np.zeros(self.hyperparams['batch_size'])
-                for obs_j, action_j, reward_j, obs_j_plus_one in minibatch:
-                    pass # TODO
+                    # Calculate target values for loss
+                    y_js = np.zeros(self.hyperparams['batch_size'])
+                    for obs_j, action_j, reward_j, obs_j_plus_one in minibatch:
+                        pass # TODO
 
-                hist = self.dqn.fit(x=TODO, y=y_js, batch_size=self.hyperparams['batch_size'])
-
-
-
+                    hist = self.dqn.fit(x=TODO, y=TODO, batch_size=self.hyperparams['batch_size'])
 
     def evaluate(self):
         pass
@@ -155,13 +165,14 @@ if __name__ == "__main__":
     hyperparams = {
         'gym_name':             'Breakout-v0',
         'num_episodes':         100,
-        'num_time_steps':       1000,
-        'replay_memory_size':   100,
+        'num_time_steps':       10000,
+        'replay_memory_size':   1000,
         'last_k_frames':        4,
         'batch_size':           32,
         'exploration_initial':  1.0,
         'exploration_final':    0.1,
-        'exploration_period':   10000
+        'exploration_period':   10000,
+        'frame_skip_amount':    3
     }
 
     print "\nUSING THE FOLLOWING HYPERPARAMS:\n"
